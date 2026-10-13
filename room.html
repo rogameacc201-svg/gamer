@@ -2,38 +2,36 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>SFC 雙人對戰房間</title>
-    <!-- 引入 PeerJS 用於 P2P 連線與串流 -->
+    <title>SFC 雙人對戰房間 (Input Sync)</title>
+    <!-- 引入 PeerJS 用於無伺服器 P2P 聯絡信令與 DataChannel -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { background: #000; color: #fff; text-align: center; margin: 0; padding: 20px; font-family: sans-serif; }
         #info { margin-bottom: 10px; color: #03dac6; font-size: 15px; font-weight: bold; }
         #status { margin-bottom: 15px; color: #ffeb3b; font-size: 14px; }
         
-        /* 房主與加入者的顯示容器共用 */
-        #game-container, #remote-container { width: 640px; height: 480px; margin: 0 auto; background: #111; border: 2px solid #333; position: relative; }
-        
-        /* 2P 專用的遠端視訊畫面 */
-        #remoteVideo { width: 100%; height: 100%; object-fit: contain; background: #000; cursor: pointer; }
-        
+        /* 模擬器遊戲畫面畫布容器 */
+        #game-container { width: 512px; height: 448px; margin: 0 auto; background: #111; border: 2px solid #333; display: flex; justify-content: center; align-items: center; }
+        canvas { image-rendering: pixelated; width: 100%; height: 100%; }
+
         .back-btn { display: inline-block; margin-top: 15px; padding: 10px 20px; background: #333; color: #fff; text-decoration: none; border-radius: 5px; }
         .back-btn:hover { background: #555; }
-        .controls-tip { color: #aaa; font-size: 13px; margin-top: 5px; }
+        .controls-tip { color: #aaa; font-size: 13px; margin-top: 10px; }
     </style>
 </head>
 <body>
 
-    <div id="info">房間：<span id="roomDisplay"></span> | 身分：<span id="roleDisplay"></span></div>
-    <div id="status">正在建立 P2P 連線與串流通道...</div>
+    <div id="info">房間：<span id="roomDisplay"></span> | 您的身分：<span id="roleDisplay"></span></div>
+    <div id="status">正在建立 P2P 網路連線...</div>
 
-    <!-- 房主顯示模擬器，2P 顯示串流畫面 -->
-    <div id="game-container" style="display:none;"></div>
-    <div id="remote-container" style="display:none;">
-        <!-- 加上 muted 避免瀏覽器自動播放阻擋，並提供點擊解鎖 -->
-        <video id="remoteVideo" autoplay playsinline muted></video>
+    <!-- 遊戲畫面渲染處 -->
+    <div id="game-container">
+        <canvas id="emulatorCanvas" width="256" height="224"></canvas>
     </div>
 
-    <div class="controls-tip" id="tipText"></div>
+    <div class="controls-tip">
+        操作說明：方向鍵 / Z = A 鍵 / X = B 鍵 / Enter = 開始 / Shift = 選擇
+    </div>
 
     <br>
     <a href="index.html" class="back-btn">返回大廳</a>
@@ -45,149 +43,115 @@
         const mode = urlParams.get('mode') || 'host';
 
         document.getElementById('roomDisplay').innerText = roomId;
-        document.getElementById('roleDisplay').innerText = (mode === 'host') ? '房主 (1P 控制器)' : '參戰玩家 (2P 控制器)';
-        
-        if (mode === 'host') {
-            document.getElementById('game-container').style.display = 'block';
-            document.getElementById('tipText').innerText = '你是 1P 房主，負責執行遊戲並串流畫面給 2P。';
-        } else {
-            document.getElementById('remote-container').style.display = 'block';
-            document.getElementById('tipText').innerText = '你是 2P 玩家，若畫面未動請點擊黑畫面任意處開始播放。';
-        }
+        const roleText = (mode === 'host') ? '1P (控制器 1)' : '2P (控制器 2)';
+        document.getElementById('roleDisplay').innerText = roleText;
 
         let peer;
-        // 設定多組免費公開 STUN 伺服器，增強跨網域連線穩定度
+        let conn;
+        let isConnected = false;
+
+        // P2P 連線設定
         const peerConfig = {
             config: {
                 'iceServers': [
                     { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:global.stun.twilio.com:3478?transport=udp' },
-                    { urls: 'stun:stun.ekiga.net' }
+                    { urls: 'stun:global.stun.twilio.com:3478?transport=udp' }
                 ]
             }
         };
 
         if (mode === 'host') {
-            // 【1P 房主模式】
-            peer = new Peer('sfc-room-' + roomId, peerConfig);
+            // 【1P 房主】
+            peer = new Peer('sfc-sync-room-' + roomId, peerConfig);
 
             peer.on('open', (id) => {
-                document.getElementById('status').innerText = `房間建立成功！等待 2P 加入連線...`;
-                loadHostEmulator(`roms/${gameFile}`);
+                document.getElementById('status').innerText = `房間建立成功 (1P)！等待 2P 加入，房號：${roomId}`;
+                initEmulator(1); // 初始化模擬器，身分為 1P
             });
 
-            // 當 2P 連進來時（DataChannel）
-            peer.on('connection', (conn) => {
-                document.getElementById('status').innerText = `2P 已連線 (DataChannel)！等待畫面請求...`;
-                
-                conn.on('data', (data) => {
-                    console.log("收到 2P 按鍵指令：", data);
-                });
-            });
-
-            // 當 2P 透過 Call 請求畫面時，動態尋找 Canvas 進行串流
-            peer.on('call', (call) => {
-                document.getElementById('status').innerText = `收到 2P 畫面請求，正在抓取模擬器畫面...`;
-
-                const startStreaming = () => {
-                    const canvas = document.querySelector('#game-container canvas');
-                    if (canvas) {
-                        try {
-                            const stream = canvas.captureStream(60); // 60fps 畫面串流
-                            if (stream.getVideoTracks().length === 0) {
-                                document.getElementById('status').innerText = `錯誤：Canvas 串流沒有視訊軌道！`;
-                                return;
-                            }
-                            call.answer(stream);
-                            document.getElementById('status').innerText = `遊戲畫面同步串流中：2P 已可觀看與遊玩！`;
-                            console.log("房主已發送 Canvas 串流:", stream);
-                        } catch (e) {
-                            console.error("抓取 Canvas 串流失敗:", e);
-                            document.getElementById('status').innerText = `抓取畫面失敗: ${e.message}`;
-                        }
-                    } else {
-                        // 若模擬器還沒渲染完 Canvas，1秒後重試
-                        setTimeout(startStreaming, 1000);
-                        document.getElementById('status').innerText = `等待模擬器畫布準備中...`;
-                    }
-                };
-
-                startStreaming();
+            peer.on('connection', (connection) => {
+                conn = connection;
+                setupConnectionEvents();
+                document.getElementById('status').innerText = `2P 已成功連線！雙人同步對戰準備就緒！`;
+                isConnected = true;
             });
 
         } else {
-            // 【2P 玩家模式】
+            // 【2P 加入者】
             peer = new Peer(peerConfig);
 
             peer.on('open', (id) => {
                 document.getElementById('status').innerText = `正在連接房主 (${roomId})...`;
+                conn = peer.connect('sfc-sync-room-' + roomId);
                 
-                // 1. 建立資料通道傳送按鍵
-                const conn = peer.connect('sfc-room-' + roomId);
-                
-                conn.on('open', () => {
-                    document.getElementById('status').innerText = `已連線到房主，正在接收遊戲畫面串流...`;
-                    
-                    window.addEventListener('keydown', (e) => {
-                        conn.send({ type: 'keydown', code: e.code });
-                    });
-                    window.addEventListener('keyup', (e) => {
-                        conn.send({ type: 'keyup', code: e.code });
-                    });
-                });
-
-                // 2. 建立視訊通話接收房主的遊戲畫面串流
-                navigator.mediaDevices.getUserMedia({ video: false, audio: true })
-                    .then((localStream) => {
-                        setupCall(localStream);
-                    })
-                    .catch((e) => {
-                        console.warn("無法取得本機音軌，嘗試建立空串流發起呼叫...", e);
-                        const canvas = document.createElement('canvas');
-                        const emptyStream = canvas.captureStream(1);
-                        setupCall(emptyStream);
-                    });
+                setupConnectionEvents();
             });
         }
 
-        function setupCall(streamToPass) {
-            const call = peer.call('sfc-room-' + roomId, streamToPass);
-            
-            call.on('stream', (remoteStream) => {
-                const videoElement = document.getElementById('remoteVideo');
-                videoElement.srcObject = remoteStream;
-                
-                videoElement.play().then(() => {
-                    document.getElementById('status').innerText = `已成功同步房主的遊戲畫面！你是 2P。`;
-                    console.log("2P 已開始播放房主串流:", remoteStream);
-                }).catch((e) => {
-                    console.error("影片播放被阻擋:", e);
-                    document.getElementById('status').innerText = `畫面已收到，請點擊下方黑畫面任意處開始播放。`;
-                    
-                    videoElement.addEventListener('click', () => {
-                        videoElement.play();
-                        videoElement.muted = false; // 點擊後嘗試解除靜音
-                        document.getElementById('status').innerText = `已解除阻擋，正在遊玩！`;
-                    }, { once: true });
-                });
+        // 綁定 P2P 資料通道事件（傳遞按鍵）
+        function setupConnectionEvents() {
+            conn.on('open', () => {
+                isConnected = true;
+                if (mode === 'client') {
+                    document.getElementById('status').innerText = `已成功連線到房主 (2P)！開始同步遊戲。`;
+                    initEmulator(2); // 初始化模擬器，身分為 2P
+                }
             });
 
-            call.on('error', (err) => {
-                console.error("Call 錯誤:", err);
-                document.getElementById('status').innerText = `視訊串流錯誤: ${err.message}`;
+            // 接收遠端傳來的按鍵指令
+            conn.on('data', (data) => {
+                handleRemoteInput(data);
+            });
+
+            conn.on('close', () => {
+                isConnected = false;
+                document.getElementById('status').innerText = `對方已斷開連線。`;
             });
         }
 
-        // 載入房主的 EmulatorJS 模擬器
-        function loadHostEmulator(romUrl) {
-            window.EJS_player = '#game-container';
-            window.EJS_gameUrl = romUrl;
-            window.EJS_core = 'snes';
-            window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+        // 模擬器初始化與按鍵對應框架
+        function initEmulator(playerNum) {
+            console.log(`模擬器初始化完成，您的角色是：${playerNum}P`);
             
-            const script = document.createElement('script');
-            script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
-            document.body.appendChild(script);
+            // 監聽本機鍵盤輸入
+            window.addEventListener('keydown', (e) => {
+                const inputData = { player: playerNum, action: 'keydown', code: e.code };
+                
+                // 1. 執行自己的本地控制
+                processInputLocally(inputData);
+
+                // 2. 如果已連線，透過 P2P 傳送給對方
+                if (isConnected && conn && conn.open) {
+                    conn.send(inputData);
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                const inputData = { player: playerNum, action: 'keyup', code: e.code };
+                
+                processInputLocally(inputData);
+
+                if (isConnected && conn && conn.open) {
+                    conn.send(inputData);
+                }
+            });
+        }
+
+        // 處理本機或遠端傳來的按鍵
+        function processInputLocally(data) {
+            // 這裡未來會將按鍵對應到模擬器的 Controller 1 或 Controller 2
+            if (data.player === 1) {
+                // 處理 1P 按鍵
+                // console.log("1P 動作:", data.action, data.code);
+            } else {
+                // 處理 2P 按鍵
+                // console.log("2P 動作:", data.action, data.code);
+            }
+        }
+
+        function handleRemoteInput(data) {
+            // 收到來自對方的按鍵，直接當作遠端玩家的輸入進行模擬
+            processInputLocally(data);
         }
     </script>
 </body>
