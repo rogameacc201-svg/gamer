@@ -2,184 +2,56 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>SFC 真實玩家對戰大廳</title>
+    <title>SFC 網頁對戰大廳</title>
     <style>
-        body { background: #0f172a; color: #f8fafc; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-        .box { background: #1e293b; padding: 20px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); margin-bottom: 20px; text-align: center; }
-        input, button { padding: 10px 15px; margin: 5px; border-radius: 6px; border: 1px solid #475569; background: #334155; color: #fff; font-size: 16px; cursor: pointer; }
-        button:hover { background: #0284c7; }
-        #screen-container { position: relative; display: none; }
-        canvas, video { border: 4px solid #334155; border-radius: 8px; background: #000; width: 512px; height: 448px; }
+        body { font-family: sans-serif; background: #121212; color: #fff; text-align: center; padding: 50px; }
+        .box { background: #1e1e1e; padding: 30px; border-radius: 10px; display: inline-block; width: 400px; }
+        select, input, button { width: 100%; padding: 12px; margin: 10px 0; border-radius: 5px; border: none; font-size: 16px; }
+        button { background: #6200ee; color: white; cursor: pointer; font-weight: bold; }
+        button:hover { background: #3700b3; }
     </style>
 </head>
 <body>
 
-    <div class="box" id="lobby">
-        <h1>SFC 網頁遠端雙人對戰</h1>
-        <div>
-            <input type="file" id="rom-file" accept=".sfc,.smc"><br>
-            <button id="btn-create">建立房間 (房主)</button>
-        </div>
-        <hr style="border-color: #334155; margin: 15px 0;">
-        <div>
-            <input type="text" id="room-input" placeholder="輸入房號">
-            <button id="btn-join">加入房間 (訪客)</button>
-        </div>
-        <p id="status-text" style="color: #38bdf8;"></p>
+    <div class="box">
+        <h2>SFC 網路對戰大廳</h2>
+        
+        <!-- 選擇遊戲 -->
+        <label>選擇遊戲：</label>
+        <select id="gameSelect">
+            <option value="mario.sfc">超級瑪利歐世界 (Super Mario World)</option>
+            <option value="contra.sfc">魂斗羅 3 (Contra III)</option>
+            <option value="streetfighter.sfc">快打旋風 2 (Street Fighter II)</option>
+        </select>
+
+        <!-- 模式一：建立房間 -->
+        <button onclick="createRoom()">建立新房間 (我是 1P 房主)</button>
+
+        <hr style="border-color: #333; margin: 20px 0;">
+
+        <!-- 模式二：加入房間 -->
+        <input type="text" id="roomInput" placeholder="請輸入房主提供的房號">
+        <button style="background: #03dac6; color: #000;" onclick="joinRoom()">加入房間 (2-4P)</button>
     </div>
 
-    <div id="screen-container">
-        <h3 id="role-title"></h3>
-        <!-- 房主用 Canvas 跑模擬器；訪客用 Video 接收房主串流 -->
-        <canvas id="host-canvas" width="256" height="240" style="display:none;"></canvas>
-        <video id="guest-video" autoplay playsinline style="display:none;"></video>
-    </div>
-
-    <!-- 引入 Socket.io 客戶端 -->
-    <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io();
-        let currentRoom = null;
-        let peerConnection;
-        let dataChannel;
-        let isHost = false;
+        function createRoom() {
+            const selectedGame = document.getElementById('gameSelect').value;
+            // 產生隨機房號
+            const roomId = Math.random().toString(36).substring(2, 8);
+            // 跳轉至房間頁面，帶入模式=host與遊戲名稱
+            window.location.href = `room.html?room=${roomId}&mode=host&game=${selectedGame}`;
+        }
 
-        // 免費 Google STUN 伺服器，讓跨網路的兩台電腦可以對穿
-        const rtcConfig = {
-            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-        };
-
-        const statusText = document.getElementById('status-text');
-
-        // 1. 房主建立房間
-        document.getElementById('btn-create').onclick = () => {
-            const romInput = document.getElementById('rom-file');
-            if (!romInput.files.length) {
-                alert('請先選擇一個 SFC 遊戲 ROM (.sfc)！');
-                return;
-            }
-            isHost = true;
-            const roomId = Math.random().toString(36.substring(2, 8)).toUpperCase();
-            currentRoom = roomId;
-            socket.emit('create-room', roomId);
-        };
-
-        socket.on('room-created', (roomId) => {
-            statusText.innerText = `房間建立成功！您的房號是：${roomId} (等待朋友加入...)`;
-            document.getElementById('lobby').style.display = 'none';
-            document.getElementById('screen-container').style.display = 'block';
-            document.getElementById('role-title').innerText = '身份：房主 (Host)';
-            document.getElementById('host-canvas').style.display = 'block';
-            
-            // 初始化房主 WebRTC 連線準備
-            setupHostPeer();
-        });
-
-        // 2. 訪客加入房間
-        document.getElementById('btn-join').onclick = () => {
-            const roomId = document.getElementById('room-input').value.trim().toUpperCase();
+        function joinRoom() {
+            const roomId = document.getElementById('roomInput').value.trim();
             if (!roomId) {
-                alert('請輸入房號！');
+                alert('請輸入有效的房號！');
                 return;
             }
-            isHost = false;
-            currentRoom = roomId;
-            socket.emit('join-room', roomId);
-        };
-
-        socket.on('joined-room', (roomId) => {
-            statusText.innerText = `成功加入房間 ${roomId}，正在連線至房主...`;
-            document.getElementById('lobby').style.display = 'none';
-            document.getElementById('screen-container').style.display = 'block';
-            document.getElementById('role-title').innerText = '身份：訪客 (Guest - 玩家 2)';
-            document.getElementById('guest-video').style.display = 'block';
-
-            setupGuestPeer();
-        });
-
-        socket.on('room-error', (msg) => {
-            alert(msg);
-        });
-
-        // --- WebRTC P2P 邏輯 ---
-
-        // 房主端 WebRTC 設定
-        function setupHostPeer() {
-            peerConnection = new RTCPeerConnection(rtcConfig);
-
-            // 當房主的 Canvas 有畫面時，透過 MediaStream 串流出去
-            const canvasStream = document.getElementById('host-canvas').captureStream(60);
-            canvasStream.getTracks().forEach(track => peerConnection.addTrack(track, canvasStream));
-
-            // 建立 DataChannel 用來接收訪客的按鍵
-            dataChannel = peerConnection.createDataChannel('gamepad');
-            dataChannel.onmessage = (event) => {
-                const inputData = JSON.parse(event.data);
-                console.log("收到遠端玩家 2 按鍵:", inputData);
-                // 這裡可以將按鍵傳給模擬器 (例如 P2 控制器)
-            };
-
-            peerConnection.onicecandidate = (event) => {
-                if (event.candidate) {
-                    socket.emit('signal', { roomId: currentRoom, signal: { type: 'candidate', candidate: event.candidate } });
-                }
-            };
-
-            // 當有訪客加入時，由房主發起 Offer
-            socket.on('peer-joined', async (guestId) => {
-                const offer = await peerConnection.createOffer();
-                await peerConnection.setLocalDescription(offer);
-                socket.emit('signal', { roomId: currentRoom, signal: peerConnection.localDescription });
-            });
+            // 跳轉至房間頁面，帶入模式=client
+            window.location.href = `room.html?room=${roomId}&mode=client`;
         }
-
-        // 訪客端 WebRTC 設定
-        function setupGuestPeer() {
-            peerConnection = new RTCPeerConnection(rtcConfig);
-
-            peerConnection.ontrack = (event) => {
-                document.getElementById('guest-video').srcObject = event.streams[0];
-            };
-
-            peerConnection.ondatachannel = (event) => {
-                dataChannel = event.channel;
-            };
-
-            peerConnection.onicecandidate = (event) => {
-                if (event.candidate) {
-                    socket.emit('signal', { roomId: currentRoom, signal: { type: 'candidate', candidate: event.candidate } });
-                }
-            };
-        }
-
-        // 信令交換中繼
-        socket.on('signal', async (data) => {
-            if (!peerConnection) return;
-            const signal = data.signal;
-
-            if (signal.type === 'offer') {
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(signal));
-                const answer = await peerConnection.createAnswer();
-                await peerConnection.setLocalDescription(answer);
-                socket.emit('signal', { roomId: currentRoom, signal: peerConnection.localDescription });
-            } else if (signal.type === 'answer') {
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(signal));
-            } else if (signal.candidate) {
-                await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
-            }
-        });
-
-        // 訪客端按鍵發送範例
-        window.addEventListener('keydown', (e) => {
-            if (!isHost && dataChannel && dataChannel.readyState === 'open') {
-                dataChannel.send(JSON.stringify({ key: e.code, action: 'down' }));
-            }
-        });
-        window.addEventListener('keyup', (e) => {
-            if (!isHost && dataChannel && dataChannel.readyState === 'open') {
-                dataChannel.send(JSON.stringify({ key: e.code, action: 'up' }));
-            }
-        });
     </script>
 </body>
 </html>
