@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>SFC 遊戲對戰大廳</title>
+    <title>SFC 網頁雙人對戰大廳</title>
     <style>
         body { font-family: sans-serif; background: #121212; color: #fff; text-align: center; padding: 50px; }
         .box { background: #1e1e1e; padding: 30px; border-radius: 10px; display: inline-block; width: 400px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
@@ -16,43 +16,36 @@
 <body>
 
     <div class="box">
-        <h2>SFC 網路對戰大廳</h2>
+        <h2>SFC 雙人連線大廳</h2>
         
-        <!-- 選擇遊戲 -->
         <label>選擇遊戲：</label>
         <select id="gameSelect">
             <option value="super_tetris_3.smc">超級俄羅斯方塊 3 (Super Tetris 3)</option>
             <option value="mario.sfc">超級瑪利歐世界 (Super Mario World)</option>
         </select>
 
-        <!-- 建立房間 -->
         <button onclick="createRoom()">建立新房間 (1P 房主)</button>
 
         <hr style="border-color: #333; margin: 20px 0;">
 
-        <!-- 加入房間 -->
-        <input type="text" id="roomInput" placeholder="請輸入房號 (例如: abc12345)">
-        <button class="join-btn" onclick="joinRoom()">加入房間 (2-4P)</button>
+        <input type="text" id="roomInput" placeholder="請輸入房號">
+        <button class="join-btn" onclick="joinRoom()">加入房間 (2P)</button>
     </div>
 
     <script>
         function createRoom() {
             const game = document.getElementById('gameSelect').value;
-            // 產生 6 位數隨機房號
             const roomId = Math.random().toString(36).substring(2, 8);
-            // 跳轉至房間頁面，設定為 host (房主)
             window.location.href = `room.html?room=${roomId}&mode=host&game=${game}`;
         }
 
         function joinRoom() {
             const roomId = document.getElementById('roomInput').value.trim();
-            const game = document.getElementById('gameSelect').value;
             if (!roomId) {
                 alert('請輸入房號！');
                 return;
             }
-            // 跳轉至房間頁面，設定為 client (加入者)
-            window.location.href = `room.html?room=${roomId}&mode=client&game=${game}`;
+            window.location.href = `room.html?room=${roomId}&mode=client`;
         }
     </script>
 </body>
