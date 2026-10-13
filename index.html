@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>SFC P2P 網頁雙人對戰大廳</title>
+    <title>SFC 網頁雙人對戰大廳</title>
     <style>
         body { font-family: sans-serif; background: #121212; color: #fff; text-align: center; padding: 50px; }
         .box { background: #1e1e1e; padding: 30px; border-radius: 10px; display: inline-block; width: 400px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
@@ -16,7 +16,7 @@
 <body>
 
     <div class="box">
-        <h2>SFC 點對點 (P2P) 雙人對戰</h2>
+        <h2>SFC 雲端零成本雙人對戰</h2>
         
         <label>選擇遊戲：</label>
         <select id="gameSelect">
@@ -34,7 +34,7 @@
     <script>
         function createRoom() {
             const game = document.getElementById('gameSelect').value;
-            const roomId = Math.random().toString(36).substring(2, 8);
+            const roomId = Math.random().toString(36).substring(2, 8); // 產生隨機 6 碼房號
             window.location.href = `room.html?room=${roomId}&mode=host&game=${game}`;
         }
 
