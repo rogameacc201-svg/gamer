@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>SFC 網頁雙人對戰大廳</title>
+    <title>SFC P2P 網頁雙人對戰大廳</title>
     <style>
         body { font-family: sans-serif; background: #121212; color: #fff; text-align: center; padding: 50px; }
         .box { background: #1e1e1e; padding: 30px; border-radius: 10px; display: inline-block; width: 400px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
@@ -16,20 +16,19 @@
 <body>
 
     <div class="box">
-        <h2>SFC 雙人連線大廳</h2>
+        <h2>SFC 點對點 (P2P) 雙人對戰</h2>
         
         <label>選擇遊戲：</label>
         <select id="gameSelect">
             <option value="super_tetris_3.smc">超級俄羅斯方塊 3 (Super Tetris 3)</option>
-            <option value="mario.sfc">超級瑪利歐世界 (Super Mario World)</option>
         </select>
 
-        <button onclick="createRoom()">建立新房間 (1P 房主)</button>
+        <button onclick="createRoom()">建立新房間 (成為 1P)</button>
 
         <hr style="border-color: #333; margin: 20px 0;">
 
         <input type="text" id="roomInput" placeholder="請輸入房號">
-        <button class="join-btn" onclick="joinRoom()">加入房間 (2P)</button>
+        <button class="join-btn" onclick="joinRoom()">加入房間 (成為 2P)</button>
     </div>
 
     <script>
