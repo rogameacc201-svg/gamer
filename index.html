@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>SFC 網路對戰大廳</title>
+    <title>SFC 遊戲大廳</title>
     <style>
         body { font-family: sans-serif; background: #121212; color: #fff; text-align: center; padding: 50px; }
         .box { background: #1e1e1e; padding: 30px; border-radius: 10px; display: inline-block; width: 400px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
@@ -16,31 +16,32 @@
 <body>
 
     <div class="box">
-        <h2>SFC 雲端對戰大廳</h2>
+        <h2>SFC 遊戲大廳</h2>
         
         <!-- 選擇遊戲 -->
         <label>選擇遊戲：</label>
         <select id="gameSelect">
-            <option value="Super Tetris 3 (J).smc">Super Tetris 3 (J)</option>
+            <option value="Super Tetris 3 (J).smc">Super Tetris 3 (J).smc</option>
             <option value="contra.sfc">魂斗羅 3 (Contra III)</option>
         </select>
 
         <!-- 建立房間 -->
-        <button onclick="createRoom()">建立新房間 (1P 房主)</button>
+        <button onclick="createRoom()">建立房間 (開房者)</button>
 
         <hr style="border-color: #333; margin: 20px 0;">
 
         <!-- 加入房間 -->
-        <input type="text" id="roomInput" placeholder="請輸入 6 位數房號">
-        <button class="join-btn" onclick="joinRoom()">加入房間 (2-4P)</button>
+        <input type="text" id="roomInput" placeholder="請輸入房號 (例如: abc12345)">
+        <button class="join-btn" onclick="joinRoom()">加入房間</button>
     </div>
 
     <script>
         function createRoom() {
             const game = document.getElementById('gameSelect').value;
+            // 產生隨機 6 位數房號
             const roomId = Math.random().toString(36).substring(2, 8);
-            // 帶入參數跳轉至房間頁面
-            window.location.href = `room.html?room=${roomId}&mode=host&game=${game}`;
+            // 透過網址參數帶入房間與遊戲資訊
+            window.location.href = `room.html?room=${roomId}&game=${game}`;
         }
 
         function joinRoom() {
@@ -49,7 +50,8 @@
                 alert('請輸入房號！');
                 return;
             }
-            window.location.href = `room.html?room=${roomId}&mode=client`;
+            // 加入時直接導向該房間 (遊戲會依據網址的 game 參數或預設載入)
+            window.location.href = `room.html?room=${roomId}`;
         }
     </script>
 </body>
