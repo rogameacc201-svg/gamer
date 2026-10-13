@@ -14,7 +14,7 @@
         #game-container, #remote-container { width: 640px; height: 480px; margin: 0 auto; background: #111; border: 2px solid #333; position: relative; }
         
         /* 2P 專用的遠端視訊畫面 */
-        #remoteVideo { width: 100%; height: 100%; object-fit: contain; background: #000; }
+        #remoteVideo { width: 100%; height: 100%; object-fit: contain; background: #000; cursor: pointer; }
         
         .back-btn { display: inline-block; margin-top: 15px; padding: 10px 20px; background: #333; color: #fff; text-decoration: none; border-radius: 5px; }
         .back-btn:hover { background: #555; }
@@ -29,7 +29,8 @@
     <!-- 房主顯示模擬器，2P 顯示串流畫面 -->
     <div id="game-container" style="display:none;"></div>
     <div id="remote-container" style="display:none;">
-        <video id="remoteVideo" autoplay playsinline></video>
+        <!-- 加上 muted 避免瀏覽器自動播放阻擋，並提供點擊解鎖 -->
+        <video id="remoteVideo" autoplay playsinline muted></video>
     </div>
 
     <div class="controls-tip" id="tipText"></div>
@@ -51,13 +52,18 @@
             document.getElementById('tipText').innerText = '你是 1P 房主，負責執行遊戲並串流畫面給 2P。';
         } else {
             document.getElementById('remote-container').style.display = 'block';
-            document.getElementById('tipText').innerText = '你是 2P 玩家，畫面上看的是房主的串流，你的按鍵會傳給房主。';
+            document.getElementById('tipText').innerText = '你是 2P 玩家，若畫面未動請點擊黑畫面任意處開始播放。';
         }
 
         let peer;
+        // 設定多組免費公開 STUN 伺服器，增強跨網域連線穩定度
         const peerConfig = {
             config: {
-                'iceServers': [{ urls: 'stun:stun.l.google.com:19302' }]
+                'iceServers': [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:global.stun.twilio.com:3478?transport=udp' },
+                    { urls: 'stun:stun.ekiga.net' }
+                ]
             }
         };
 
@@ -70,30 +76,43 @@
                 loadHostEmulator(`roms/${gameFile}`);
             });
 
-            // 當 2P 連進來時，房主透過 WebRTC 呼叫對方，把自己的畫面 Canvas 串流過去
+            // 當 2P 連進來時（DataChannel）
             peer.on('connection', (conn) => {
-                document.getElementById('status').innerText = `2P 已連線！正在建立畫面串流...`;
-
-                // 接收 2P 傳來的按鍵
+                document.getElementById('status').innerText = `2P 已連線 (DataChannel)！等待畫面請求...`;
+                
                 conn.on('data', (data) => {
                     console.log("收到 2P 按鍵指令：", data);
-                    // 之後可在此處將遠端按鍵映射到模擬器 2P 控制器
                 });
             });
 
-            // 同時監聽視訊通話連線（用於畫面串流）
+            // 當 2P 透過 Call 請求畫面時，動態尋找 Canvas 進行串流
             peer.on('call', (call) => {
-                // 等待模擬器的 canvas 畫面準備好後抓取串流
-                setTimeout(() => {
+                document.getElementById('status').innerText = `收到 2P 畫面請求，正在抓取模擬器畫面...`;
+
+                const startStreaming = () => {
                     const canvas = document.querySelector('#game-container canvas');
                     if (canvas) {
-                        const stream = canvas.captureStream(60); // 60fps 畫面串流
-                        call.answer(stream); // 回傳串流給 2P
-                        document.getElementById('status').innerText = `遊戲畫面同步串流中：2P 已可觀看與遊玩！`;
+                        try {
+                            const stream = canvas.captureStream(60); // 60fps 畫面串流
+                            if (stream.getVideoTracks().length === 0) {
+                                document.getElementById('status').innerText = `錯誤：Canvas 串流沒有視訊軌道！`;
+                                return;
+                            }
+                            call.answer(stream);
+                            document.getElementById('status').innerText = `遊戲畫面同步串流中：2P 已可觀看與遊玩！`;
+                            console.log("房主已發送 Canvas 串流:", stream);
+                        } catch (e) {
+                            console.error("抓取 Canvas 串流失敗:", e);
+                            document.getElementById('status').innerText = `抓取畫面失敗: ${e.message}`;
+                        }
                     } else {
-                        document.getElementById('status').innerText = `錯誤：找不到模擬器 Canvas 畫面。`;
+                        // 若模擬器還沒渲染完 Canvas，1秒後重試
+                        setTimeout(startStreaming, 1000);
+                        document.getElementById('status').innerText = `等待模擬器畫布準備中...`;
                     }
-                }, 3000); // 預留 3 秒給模擬器載入
+                };
+
+                startStreaming();
             });
 
         } else {
@@ -109,7 +128,6 @@
                 conn.on('open', () => {
                     document.getElementById('status').innerText = `已連線到房主，正在接收遊戲畫面串流...`;
                     
-                    // 監聽鍵盤傳給房主
                     window.addEventListener('keydown', (e) => {
                         conn.send({ type: 'keydown', code: e.code });
                     });
@@ -119,12 +137,44 @@
                 });
 
                 // 2. 建立視訊通話接收房主的遊戲畫面串流
-                const call = peer.call('sfc-room-' + roomId, null); // 呼叫房主
-                call.on('stream', (remoteStream) => {
-                    const videoElement = document.getElementById('remoteVideo');
-                    videoElement.srcObject = remoteStream;
-                    document.getElementById('status').innerText = `已成功同步房主的遊戲畫面！`;
+                navigator.mediaDevices.getUserMedia({ video: false, audio: true })
+                    .then((localStream) => {
+                        setupCall(localStream);
+                    })
+                    .catch((e) => {
+                        console.warn("無法取得本機音軌，嘗試建立空串流發起呼叫...", e);
+                        const canvas = document.createElement('canvas');
+                        const emptyStream = canvas.captureStream(1);
+                        setupCall(emptyStream);
+                    });
+            });
+        }
+
+        function setupCall(streamToPass) {
+            const call = peer.call('sfc-room-' + roomId, streamToPass);
+            
+            call.on('stream', (remoteStream) => {
+                const videoElement = document.getElementById('remoteVideo');
+                videoElement.srcObject = remoteStream;
+                
+                videoElement.play().then(() => {
+                    document.getElementById('status').innerText = `已成功同步房主的遊戲畫面！你是 2P。`;
+                    console.log("2P 已開始播放房主串流:", remoteStream);
+                }).catch((e) => {
+                    console.error("影片播放被阻擋:", e);
+                    document.getElementById('status').innerText = `畫面已收到，請點擊下方黑畫面任意處開始播放。`;
+                    
+                    videoElement.addEventListener('click', () => {
+                        videoElement.play();
+                        videoElement.muted = false; // 點擊後嘗試解除靜音
+                        document.getElementById('status').innerText = `已解除阻擋，正在遊玩！`;
+                    }, { once: true });
                 });
+            });
+
+            call.on('error', (err) => {
+                console.error("Call 錯誤:", err);
+                document.getElementById('status').innerText = `視訊串流錯誤: ${err.message}`;
             });
         }
 
