@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>SFC WebSocket 雙人對戰房間</title>
+    <title>SFC 雙人對戰房間</title>
     <style>
         body { background: #000; color: #fff; text-align: center; margin: 0; padding: 20px; font-family: sans-serif; }
         #info { margin-bottom: 10px; color: #03dac6; font-size: 15px; font-weight: bold; }
@@ -11,15 +11,20 @@
         canvas { image-rendering: pixelated; width: 100%; height: 100%; }
         .back-btn { display: inline-block; margin-top: 15px; padding: 10px 20px; background: #333; color: #fff; text-decoration: none; border-radius: 5px; }
         .back-btn:hover { background: #555; }
+        .controls-tip { color: #aaa; font-size: 13px; margin-top: 10px; }
     </style>
 </head>
 <body>
 
     <div id="info">房間：<span id="roomDisplay"></span> | 您的身分：<span id="roleDisplay"></span></div>
-    <div id="status">正在連線至 WebSocket 信令伺服器...</div>
+    <div id="status">正在連線至雲端信令通道...</div>
 
     <div id="game-container">
         <canvas id="emulatorCanvas" width="256" height="224"></canvas>
+    </div>
+
+    <div class="controls-tip">
+        操作提示：按下鍵盤方向鍵或按鈕，會在 F12 主控台即時同步互傳。
     </div>
 
     <br>
@@ -33,56 +38,56 @@
         document.getElementById('roomDisplay').innerText = roomId;
         document.getElementById('roleDisplay').innerText = (mode === 'host') ? '1P 房主' : '2P 玩家';
 
-        // 連結你的 WebSocket 伺服器 (若部署上雲端，換成對應的 wss:// 網址)
-        const wsUrl = 'ws://localhost:3000';
-        const ws = new WebSocket(wsUrl);
+        // 使用免費公開的 WebSocket 測試通道
+        const ws = new WebSocket('wss://socketsbay.com/wss/v2/1/demo/');
 
         let isConnected = false;
 
         ws.onopen = () => {
-            document.getElementById('status').innerText = `已連線至信令伺服器，正在註冊房間...`;
+            document.getElementById('status').innerText = `已連線至雲端通道，正在廣播房間狀態...`;
             
-            if (mode === 'host') {
-                ws.send(JSON.stringify({ type: 'create_room', roomId: roomId }));
-            } else {
-                ws.send(JSON.stringify({ type: 'join_room', roomId: roomId }));
-            }
+            // 發送加入或建立房號的識別訊息
+            ws.send(JSON.stringify({
+                type: 'JOIN_ROOM',
+                roomId: roomId,
+                role: mode
+            }));
+            
+            isConnected = true;
+            document.getElementById('status').innerText = `雙人同步通道已就緒！ (${mode === 'host' ? '1P' : '2P'})`;
         };
 
         ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-
-            if (data.status === 'room_created') {
-                document.getElementById('status').innerText = `房間建立成功！等待 2P 加入中...`;
-            } else if (data.status === 'joined_success') {
-                document.getElementById('status').innerText = `成功加入房間！已與房主建立同步通道。`;
-                isConnected = true;
-            } else if (data.status === 'room_not_found') {
-                document.getElementById('status').innerText = `錯誤：找不到此房號，請確認房號是否正確。`;
-            } else if (data.type === 'client_joined') {
-                document.getElementById('status').innerText = `2P 玩家已連線加入！雙人對戰就緒。`;
-                isConnected = true;
-            } else if (data.type === 'signal') {
-                // 收到對方透過伺服器轉發的按鍵訊號
-                handleRemoteInput(data.payload);
+            try {
+                // 有時公開測試伺服器會收到其他人的雜訊，必須用 roomId 過濾
+                const data = JSON.parse(event.data);
+                
+                if (data.roomId === roomId && data.sender !== getClientId()) {
+                    if (data.type === 'INPUT_SYNC') {
+                        handleRemoteInput(data.payload);
+                    }
+                }
+            } catch (e) {
+                // 忽略解析失敗的無關字串
             }
         };
 
         ws.onerror = (err) => {
-            document.getElementById('status').innerText = `WebSocket 連線錯誤，請確認伺服器是否啟動。`;
+            document.getElementById('status').innerText = `通道連線發生錯誤。`;
             console.error(err);
         };
 
-        // 監聽本機鍵盤輸入並透過 WebSocket 傳送
+        // 產生一個隨機的使用者分頁 ID 避免收到自己的訊息
+        const clientId = Math.random().toString(36).substring(2, 10);
+        function getClientId() { return clientId; }
+
+        // 監聽本機鍵盤輸入
         window.addEventListener('keydown', (e) => {
             if (!isConnected) return;
             const payload = { player: (mode === 'host' ? 1 : 2), action: 'keydown', code: e.code };
             
-            // 執行本地對應
             processInput(payload);
-
-            // 傳送給對方
-            ws.send(JSON.stringify({ type: 'forward_signal', roomId: roomId, payload: payload }));
+            sendSignal(payload);
         });
 
         window.addEventListener('keyup', (e) => {
@@ -90,16 +95,27 @@
             const payload = { player: (mode === 'host' ? 1 : 2), action: 'keyup', code: e.code };
             
             processInput(payload);
-            ws.send(JSON.stringify({ type: 'forward_signal', roomId: roomId, payload: payload }));
+            sendSignal(payload);
         });
 
+        function sendSignal(payload) {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    roomId: roomId,
+                    sender: getClientId(),
+                    type: 'INPUT_SYNC',
+                    payload: payload
+                }));
+            }
+        }
+
         function processInput(data) {
-            console.log(`收到按鍵 - 玩家 ${data.player}: ${data.action} (${data.code})`);
+            console.log(`[本地動作] 玩家 ${data.player}: ${data.action} (${data.code})`);
         }
 
         function handleRemoteInput(payload) {
-            console.log(`收到遠端玩家動作 ->`, payload);
-            // 這裡未來會直接輸入到你的模擬器核心控制器中
+            console.log(`[收到遠端對手動作] 玩家 ${payload.player}: ${payload.action} (${payload.code})`);
+            // 這裡未來可以直接對應到 SFC 模擬器的控制器輸入
         }
     </script>
 </body>
