@@ -2,35 +2,24 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>SFC 雙人對戰房間 (Input Sync)</title>
-    <!-- 引入 PeerJS 用於無伺服器 P2P 聯絡信令與 DataChannel -->
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <title>SFC WebSocket 雙人對戰房間</title>
     <style>
         body { background: #000; color: #fff; text-align: center; margin: 0; padding: 20px; font-family: sans-serif; }
         #info { margin-bottom: 10px; color: #03dac6; font-size: 15px; font-weight: bold; }
         #status { margin-bottom: 15px; color: #ffeb3b; font-size: 14px; }
-        
-        /* 模擬器遊戲畫面畫布容器 */
         #game-container { width: 512px; height: 448px; margin: 0 auto; background: #111; border: 2px solid #333; display: flex; justify-content: center; align-items: center; }
         canvas { image-rendering: pixelated; width: 100%; height: 100%; }
-
         .back-btn { display: inline-block; margin-top: 15px; padding: 10px 20px; background: #333; color: #fff; text-decoration: none; border-radius: 5px; }
         .back-btn:hover { background: #555; }
-        .controls-tip { color: #aaa; font-size: 13px; margin-top: 10px; }
     </style>
 </head>
 <body>
 
     <div id="info">房間：<span id="roomDisplay"></span> | 您的身分：<span id="roleDisplay"></span></div>
-    <div id="status">正在建立 P2P 網路連線...</div>
+    <div id="status">正在連線至 WebSocket 信令伺服器...</div>
 
-    <!-- 遊戲畫面渲染處 -->
     <div id="game-container">
         <canvas id="emulatorCanvas" width="256" height="224"></canvas>
-    </div>
-
-    <div class="controls-tip">
-        操作說明：方向鍵 / Z = A 鍵 / X = B 鍵 / Enter = 開始 / Shift = 選擇
     </div>
 
     <br>
@@ -39,119 +28,78 @@
     <script>
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('room') || 'test';
-        const gameFile = urlParams.get('game') || 'super_tetris_3.smc';
         const mode = urlParams.get('mode') || 'host';
 
         document.getElementById('roomDisplay').innerText = roomId;
-        const roleText = (mode === 'host') ? '1P (控制器 1)' : '2P (控制器 2)';
-        document.getElementById('roleDisplay').innerText = roleText;
+        document.getElementById('roleDisplay').innerText = (mode === 'host') ? '1P 房主' : '2P 玩家';
 
-        let peer;
-        let conn;
+        // 連結你的 WebSocket 伺服器 (若部署上雲端，換成對應的 wss:// 網址)
+        const wsUrl = 'ws://localhost:3000';
+        const ws = new WebSocket(wsUrl);
+
         let isConnected = false;
 
-        // P2P 連線設定
-        const peerConfig = {
-            config: {
-                'iceServers': [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:global.stun.twilio.com:3478?transport=udp' }
-                ]
+        ws.onopen = () => {
+            document.getElementById('status').innerText = `已連線至信令伺服器，正在註冊房間...`;
+            
+            if (mode === 'host') {
+                ws.send(JSON.stringify({ type: 'create_room', roomId: roomId }));
+            } else {
+                ws.send(JSON.stringify({ type: 'join_room', roomId: roomId }));
             }
         };
 
-        if (mode === 'host') {
-            // 【1P 房主】
-            peer = new Peer('sfc-sync-room-' + roomId, peerConfig);
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
 
-            peer.on('open', (id) => {
-                document.getElementById('status').innerText = `房間建立成功 (1P)！等待 2P 加入，房號：${roomId}`;
-                initEmulator(1); // 初始化模擬器，身分為 1P
-            });
-
-            peer.on('connection', (connection) => {
-                conn = connection;
-                setupConnectionEvents();
-                document.getElementById('status').innerText = `2P 已成功連線！雙人同步對戰準備就緒！`;
+            if (data.status === 'room_created') {
+                document.getElementById('status').innerText = `房間建立成功！等待 2P 加入中...`;
+            } else if (data.status === 'joined_success') {
+                document.getElementById('status').innerText = `成功加入房間！已與房主建立同步通道。`;
                 isConnected = true;
-            });
-
-        } else {
-            // 【2P 加入者】
-            peer = new Peer(peerConfig);
-
-            peer.on('open', (id) => {
-                document.getElementById('status').innerText = `正在連接房主 (${roomId})...`;
-                conn = peer.connect('sfc-sync-room-' + roomId);
-                
-                setupConnectionEvents();
-            });
-        }
-
-        // 綁定 P2P 資料通道事件（傳遞按鍵）
-        function setupConnectionEvents() {
-            conn.on('open', () => {
+            } else if (data.status === 'room_not_found') {
+                document.getElementById('status').innerText = `錯誤：找不到此房號，請確認房號是否正確。`;
+            } else if (data.type === 'client_joined') {
+                document.getElementById('status').innerText = `2P 玩家已連線加入！雙人對戰就緒。`;
                 isConnected = true;
-                if (mode === 'client') {
-                    document.getElementById('status').innerText = `已成功連線到房主 (2P)！開始同步遊戲。`;
-                    initEmulator(2); // 初始化模擬器，身分為 2P
-                }
-            });
-
-            // 接收遠端傳來的按鍵指令
-            conn.on('data', (data) => {
-                handleRemoteInput(data);
-            });
-
-            conn.on('close', () => {
-                isConnected = false;
-                document.getElementById('status').innerText = `對方已斷開連線。`;
-            });
-        }
-
-        // 模擬器初始化與按鍵對應框架
-        function initEmulator(playerNum) {
-            console.log(`模擬器初始化完成，您的角色是：${playerNum}P`);
-            
-            // 監聽本機鍵盤輸入
-            window.addEventListener('keydown', (e) => {
-                const inputData = { player: playerNum, action: 'keydown', code: e.code };
-                
-                // 1. 執行自己的本地控制
-                processInputLocally(inputData);
-
-                // 2. 如果已連線，透過 P2P 傳送給對方
-                if (isConnected && conn && conn.open) {
-                    conn.send(inputData);
-                }
-            });
-
-            window.addEventListener('keyup', (e) => {
-                const inputData = { player: playerNum, action: 'keyup', code: e.code };
-                
-                processInputLocally(inputData);
-
-                if (isConnected && conn && conn.open) {
-                    conn.send(inputData);
-                }
-            });
-        }
-
-        // 處理本機或遠端傳來的按鍵
-        function processInputLocally(data) {
-            // 這裡未來會將按鍵對應到模擬器的 Controller 1 或 Controller 2
-            if (data.player === 1) {
-                // 處理 1P 按鍵
-                // console.log("1P 動作:", data.action, data.code);
-            } else {
-                // 處理 2P 按鍵
-                // console.log("2P 動作:", data.action, data.code);
+            } else if (data.type === 'signal') {
+                // 收到對方透過伺服器轉發的按鍵訊號
+                handleRemoteInput(data.payload);
             }
+        };
+
+        ws.onerror = (err) => {
+            document.getElementById('status').innerText = `WebSocket 連線錯誤，請確認伺服器是否啟動。`;
+            console.error(err);
+        };
+
+        // 監聽本機鍵盤輸入並透過 WebSocket 傳送
+        window.addEventListener('keydown', (e) => {
+            if (!isConnected) return;
+            const payload = { player: (mode === 'host' ? 1 : 2), action: 'keydown', code: e.code };
+            
+            // 執行本地對應
+            processInput(payload);
+
+            // 傳送給對方
+            ws.send(JSON.stringify({ type: 'forward_signal', roomId: roomId, payload: payload }));
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (!isConnected) return;
+            const payload = { player: (mode === 'host' ? 1 : 2), action: 'keyup', code: e.code };
+            
+            processInput(payload);
+            ws.send(JSON.stringify({ type: 'forward_signal', roomId: roomId, payload: payload }));
+        });
+
+        function processInput(data) {
+            console.log(`收到按鍵 - 玩家 ${data.player}: ${data.action} (${data.code})`);
         }
 
-        function handleRemoteInput(data) {
-            // 收到來自對方的按鍵，直接當作遠端玩家的輸入進行模擬
-            processInputLocally(data);
+        function handleRemoteInput(payload) {
+            console.log(`收到遠端玩家動作 ->`, payload);
+            // 這裡未來會直接輸入到你的模擬器核心控制器中
         }
     </script>
 </body>
