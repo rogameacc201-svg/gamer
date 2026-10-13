@@ -2,10 +2,13 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>SFC 遊戲房間</title>
+    <title>SFC 遊戲對戰房間</title>
+    <!-- 引入 PeerJS 用於 P2P 網路對戰 -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { background: #000; color: #fff; text-align: center; margin: 0; padding: 20px; font-family: sans-serif; }
-        #info { margin-bottom: 15px; color: #03dac6; font-size: 16px; font-weight: bold; }
+        #info { margin-bottom: 10px; color: #03dac6; font-size: 15px; font-weight: bold; }
+        #status { margin-bottom: 15px; color: #ffeb3b; font-size: 14px; }
         #game-container { width: 640px; height: 480px; margin: 0 auto; background: #111; border: 2px solid #333; }
         .back-btn { display: inline-block; margin-top: 15px; padding: 10px 20px; background: #333; color: #fff; text-decoration: none; border-radius: 5px; }
         .back-btn:hover { background: #555; }
@@ -13,7 +16,8 @@
 </head>
 <body>
 
-    <div id="info">正在載入房間：<span id="roomDisplay"></span> | 遊戲：<span id="gameDisplay"></span></div>
+    <div id="info">房間：<span id="roomDisplay"></span> | 身分：<span id="roleDisplay"></span></div>
+    <div id="status">正在初始化網路連線...</div>
 
     <!-- 模擬器掛載容器 -->
     <div id="game-container"></div>
@@ -22,24 +26,88 @@
     <a href="index.html" class="back-btn">返回大廳</a>
 
     <script>
-        // 解析網址參數
         const urlParams = new URLSearchParams(window.location.search);
-        const roomId = urlParams.get('room') || '未知房號';
-        const gameFile = urlParams.get('game') || 'mario.sfc'; // 如果是加入者沒帶 game，預設帶入或讓其選擇
+        const roomId = urlParams.get('room') || 'test';
+        const gameFile = urlParams.get('game') || 'super_tetris_3.smc';
+        
+        // 判斷網址有沒有帶 mode，如果沒有且不是房主，預設讓加入者以 client 進入
+        // 或者是從 index.html 傳進來的
+        const mode = urlParams.get('mode') || 'host';
 
         document.getElementById('roomDisplay').innerText = roomId;
-        document.getElementById('gameDisplay').innerText = gameFile;
+        document.getElementById('roleDisplay').innerText = (mode === 'host') ? '房主 (1P)' : '參戰玩家 (2-4P)';
 
-        // 設定並啟動 EmulatorJS
-        window.EJS_player = '#game-container';
-        window.EJS_gameUrl = `roms/${gameFile}`; // 確保你的專案根目錄下有 roms 資料夾並放好對應的 .sfc 檔
-        window.EJS_core = 'snes';
-        window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
-        
-        // 動態載入模擬器主程式
-        const script = document.createElement('script');
-        script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
-        document.body.appendChild(script);
+        let peer;
+
+        // 設定免費的公開 STUN 伺服器，解決 Network Error 跨網域連線問題
+        const peerConfig = {
+            config: {
+                'iceServers': [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:global.stun.twilio.com:3478' }
+                ]
+            }
+        };
+
+        if (mode === 'host') {
+            // 【房主模式】建立專屬房號 ID
+            peer = new Peer('sfc-room-' + roomId, peerConfig);
+
+            peer.on('open', (id) => {
+                document.getElementById('status').innerText = `房間建立成功！請將本頁網址分享給朋友一起玩。`;
+                loadEmulator(`roms/${gameFile}`);
+            });
+
+            peer.on('error', (err) => {
+                console.error(err);
+                document.getElementById('status').innerText = `連線錯誤: ${err.type}，請重新整理頁面。`;
+            });
+
+            // 監聽有沒有其他玩家連進來
+            peer.on('connection', (conn) => {
+                document.getElementById('status').innerText = `有新玩家成功加入房間！`;
+                
+                conn.on('data', (data) => {
+                    // 這裡可以接收其他玩家傳來的按鍵指令
+                    console.log("收到來自 2P 的按鍵:", data);
+                });
+            });
+
+        } else {
+            // 【加入者模式】隨機產生自己的 ID 並連線到房主
+            peer = new Peer(peerConfig);
+
+            peer.on('open', (id) => {
+                document.getElementById('status').innerText = `正在連接房主 (${roomId})...`;
+                const conn = peer.connect('sfc-room-' + roomId);
+
+                conn.on('open', () => {
+                    document.getElementById('status').innerText = `已成功連線到房主！開始載入遊戲。`;
+                    loadEmulator(`roms/${gameFile}`);
+
+                    // 示範：把自己的按鍵傳送給房主
+                    window.addEventListener('keydown', (e) => {
+                        conn.send({ type: 'keydown', key: e.key, player: '2P' });
+                    });
+                });
+
+                conn.on('error', (err) => {
+                    document.getElementById('status').innerText = `無法連線到房主，請確認房號是否正確。`;
+                });
+            });
+        }
+
+        // 載入 EmulatorJS 模擬器
+        function loadEmulator(romUrl) {
+            window.EJS_player = '#game-container';
+            window.EJS_gameUrl = romUrl;
+            window.EJS_core = 'snes';
+            window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+            
+            const script = document.createElement('script');
+            script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+            document.body.appendChild(script);
+        }
     </script>
 </body>
 </html>
