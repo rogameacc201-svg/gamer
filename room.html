@@ -3,88 +3,83 @@
 <head>
     <meta charset="UTF-8">
     <title>SFC 遊戲對戰房間</title>
+    <!-- 引入 PeerJS 用於 P2P 網路對戰 -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { background: #000; color: #fff; text-align: center; margin: 0; padding: 20px; font-family: sans-serif; }
-        #status { margin-bottom: 10px; color: #03dac6; font-size: 14px; }
-        #canvas-container { display: inline-block; position: relative; border: 2px solid #333; }
-        canvas { background: #111; display: block; width: 512px; height: 448px; }
+        #status { margin-bottom: 15px; color: #03dac6; font-size: 15px; font-weight: bold; }
+        #game-container { width: 640px; height: 480px; margin: 0 auto; background: #111; border: 2px solid #333; }
     </style>
 </head>
 <body>
 
     <h2>SFC 房間：<span id="roomDisplay"></span> (<span id="roleDisplay"></span>)</h2>
-    <div id="status">正在建立連線...</div>
+    <div id="status">正在初始化網路與模擬器...</div>
 
-    <div id="canvas-container">
-        <canvas id="gameCanvas" width="512" height="448"></canvas>
-    </div>
+    <!-- 模擬器掛載容器 -->
+    <div id="game-container"></div>
 
     <script>
-        // 解析網址參數
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('room');
         const mode = urlParams.get('mode'); // 'host' 或 'client'
-        const game = urlParams.get('game');
+        const gameFile = urlParams.get('game');
 
         document.getElementById('roomDisplay').innerText = roomId;
         document.getElementById('roleDisplay').innerText = (mode === 'host') ? '房主 (1P)' : '參戰玩家 (2-4P)';
 
         let peer;
-        let connections = []; // 儲存連線到房主的玩家
 
         if (mode === 'host') {
-            // 【房主模式】使用房號作為 Peer ID
+            // 【房主模式】
             peer = new Peer('sfc-room-' + roomId);
             
             peer.on('open', (id) => {
-                document.getElementById('status').innerText = `房間建立成功！請將房號「 ${roomId} 」分享給其他人。`;
-                // 房主載入遊戲核心與 ROM
-                initEmulator(game, true);
+                document.getElementById('status').innerText = `房間建立成功！請將房號「 ${roomId} 」分享給朋友。`;
+                // 啟動 EmulatorJS 載入遊戲
+                loadEmulator(`roms/${gameFile}`);
             });
 
-            // 監聽其他玩家加入
             peer.on('connection', (conn) => {
-                connections.push(conn);
-                document.getElementById('status').innerText = `有新玩家加入！目前連線人數：${connections.length + 1} 人`;
-
+                document.getElementById('status').innerText = `有新玩家加入連線！`;
                 conn.on('data', (data) => {
-                    // 收到其他玩家傳來的控制器按鍵，轉發給模擬器
-                    console.log("收到遠端玩家按鍵：", data);
+                    // 接收其他玩家的按鍵指令並同步到遊戲中
+                    console.log("收到玩家按鍵:", data);
                 });
             });
 
         } else {
-            // 【加入者模式】隨機產生自己的 ID 並連線到房主
+            // 【加入者模式】
             peer = new Peer();
 
             peer.on('open', (id) => {
-                document.getElementById('status').innerText = `正在連接房主 (${roomId})...`;
+                document.getElementById('status').innerText = `正在連線至房主 (${roomId})...`;
                 const conn = peer.connect('sfc-room-' + roomId);
 
                 conn.on('open', () => {
-                    document.getElementById('status').innerText = `已成功加入房間！可以開始遊玩。`;
-                    initEmulator(null, false);
+                    document.getElementById('status').innerText = `已成功加入房間！同步載入遊戲畫面中...`;
+                    // 加入者也可以在本地載入模擬器（或接收房主的畫面串流）
+                    loadEmulator(null);
+                });
 
-                    // 範例：傳送按鍵給房主
-                    window.addEventListener('keydown', (e) => {
-                        conn.send({ type: 'keydown', key: e.key });
-                    });
+                // 傳送自己的按鍵給房主
+                window.addEventListener('keydown', (e) => {
+                    conn.send({ type: 'keydown', key: e.key });
                 });
             });
         }
 
-        function initEmulator(gameFile, isHost) {
-            const canvas = document.getElementById('gameCanvas');
-            const ctx = canvas.getContext('2d');
+        // 初始化 EmulatorJS 核心的函數
+        function loadEmulator(romUrl) {
+            window.EJS_player = '#game-container';
+            window.EJS_gameUrl = romUrl; // 如果是 client，可以由房主透過 P2P 傳送 ROM 資料流或共用網址
+            window.EJS_core = 'snes';
+            window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
             
-            // 畫面提示文字
-            ctx.fillStyle = "#fff";
-            ctx.font = "20px sans-serif";
-            ctx.fillText(isHost ? `[Host] 正在執行: ${gameFile}` : "[Client] 等待房主畫面同步...", 50, 220);
-
-            // 提示：此處可整合 EmulatorJS 或對應的 SFC Wasm 模擬器核心初始化
-            // 房主負責跑遊戲迴圈，Client 負責接收畫面與發送按鍵
+            // 動態載入 EmulatorJS Loader script
+            const script = document.createElement('script');
+            script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+            document.body.appendChild(script);
         }
     </script>
 </body>
