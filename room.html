@@ -5,9 +5,12 @@
     <title>SFC 遊戲對戰房間</title>
     <!-- 引入 PeerJS 用於 P2P 網路對戰 -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- 引入 Firebase 核心 SDK (用於房間狀態同步與清理) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
     <style>
         body { background: #000; color: #fff; text-align: center; margin: 0; padding: 20px; font-family: sans-serif; }
-        #info { margin-bottom: 10px; color: #03dac6; font-size: 15px; font-weight: bold; }
+        #info { margin-bottom: 10px; color: #03dac6; font-size: 16px; font-weight: bold; }
         #status { margin-bottom: 15px; color: #ffeb3b; font-size: 14px; }
         #game-container { width: 640px; height: 480px; margin: 0 auto; background: #111; border: 2px solid #333; }
         .back-btn { display: inline-block; margin-top: 15px; padding: 10px 20px; background: #333; color: #fff; text-decoration: none; border-radius: 5px; }
@@ -16,30 +19,38 @@
 </head>
 <body>
 
-    <div id="info">房間：<span id="roomDisplay"></span> | 身分：<span id="roleDisplay"></span></div>
-    <div id="status">正在初始化網路連線...</div>
+    <div id="info">房間：<span id="roomDisplay"></span> | 身分：<span id="roleDisplay"></span> | 遊戲：<span id="gameDisplay"></span></div>
+    <div id="status">正在初始化網路與模擬器...</div>
 
     <!-- 模擬器掛載容器 -->
     <div id="game-container"></div>
 
     <br>
-    <a href="index.html" class="back-btn">返回大廳</a>
+    <a href="index.html" class="back-btn" id="backBtn">返回大廳</a>
 
     <script>
+        // 初始化 Firebase（對應大廳的共用測試資料庫）
+        const firebaseConfig = {
+            databaseURL: "https://sfc-game-lobby-default-rtdb.firebaseio.com/"
+        };
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const db = firebase.database();
+
+        // 解析網址參數
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('room') || 'test';
         const gameFile = urlParams.get('game') || 'super_tetris_3.smc';
-        
-        // 判斷網址有沒有帶 mode，如果沒有且不是房主，預設讓加入者以 client 進入
-        // 或者是從 index.html 傳進來的
         const mode = urlParams.get('mode') || 'host';
 
         document.getElementById('roomDisplay').innerText = roomId;
+        document.getElementById('gameDisplay').innerText = gameFile;
         document.getElementById('roleDisplay').innerText = (mode === 'host') ? '房主 (1P)' : '參戰玩家 (2-4P)';
 
         let peer;
 
-        // 設定免費的公開 STUN 伺服器，解決 Network Error 跨網域連線問題
+        // 設定免費的公開 STUN 伺服器，解決網路連線與防火牆阻擋問題
         const peerConfig = {
             config: {
                 'iceServers': [
@@ -54,7 +65,7 @@
             peer = new Peer('sfc-room-' + roomId, peerConfig);
 
             peer.on('open', (id) => {
-                document.getElementById('status').innerText = `房間建立成功！請將本頁網址分享給朋友一起玩。`;
+                document.getElementById('status').innerText = `房間建立成功！已透過 P2P 準備就緒。`;
                 loadEmulator(`roms/${gameFile}`);
             });
 
@@ -68,7 +79,7 @@
                 document.getElementById('status').innerText = `有新玩家成功加入房間！`;
                 
                 conn.on('data', (data) => {
-                    // 這裡可以接收其他玩家傳來的按鍵指令
+                    // 接收其他玩家傳來的按鍵指令
                     console.log("收到來自 2P 的按鍵:", data);
                 });
             });
@@ -85,19 +96,19 @@
                     document.getElementById('status').innerText = `已成功連線到房主！開始載入遊戲。`;
                     loadEmulator(`roms/${gameFile}`);
 
-                    // 示範：把自己的按鍵傳送給房主
+                    // 將自己的按鍵傳送給房主
                     window.addEventListener('keydown', (e) => {
                         conn.send({ type: 'keydown', key: e.key, player: '2P' });
                     });
                 });
 
                 conn.on('error', (err) => {
-                    document.getElementById('status').innerText = `無法連線到房主，請確認房號是否正確。`;
+                    document.getElementById('status').innerText = `無法連線到房主，請確認房號是否正確或房主已離開。`;
                 });
             });
         }
 
-        // 載入 EmulatorJS 模擬器
+        // 載入 EmulatorJS 模擬器核心
         function loadEmulator(romUrl) {
             window.EJS_player = '#game-container';
             window.EJS_gameUrl = romUrl;
@@ -108,6 +119,16 @@
             script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
             document.body.appendChild(script);
         }
+
+        // 當房主離開或關閉頁面時，自動從 Firebase 刪除該房間，讓大廳即時消失
+        function removeRoomFromDB() {
+            if (mode === 'host') {
+                db.ref('rooms/' + roomId).remove();
+            }
+        }
+
+        window.addEventListener('beforeunload', removeRoomFromDB);
+        document.getElementById('backBtn').addEventListener('click', removeRoomFromDB);
     </script>
 </body>
 </html>
