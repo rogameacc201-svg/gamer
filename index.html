@@ -2,131 +2,58 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>SFC 遊戲大廳</title>
-    <!-- 引入 Firebase 核心 SDK (用於實現即時房間列表) -->
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+    <title>SFC 遊戲對戰大廳</title>
     <style>
-        body { font-family: sans-serif; background: #121212; color: #fff; display: flex; justify-content: center; align-items: flex-start; padding: 40px; gap: 20px; margin: 0; }
-        .box { background: #1e1e1e; padding: 25px; border-radius: 10px; width: 380px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); box-sizing: border-box; }
-        h2 { margin-top: 0; font-size: 20px; color: #03dac6; border-bottom: 1px solid #333; padding-bottom: 10px; }
-        select, input, button { width: 100%; padding: 12px; margin: 10px 0; border-radius: 5px; border: none; font-size: 15px; box-sizing: border-box; }
+        body { font-family: sans-serif; background: #121212; color: #fff; text-align: center; padding: 50px; }
+        .box { background: #1e1e1e; padding: 30px; border-radius: 10px; display: inline-block; width: 400px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        select, input, button { width: 100%; padding: 12px; margin: 10px 0; border-radius: 5px; border: none; font-size: 16px; box-sizing: border-box; }
         button { background: #6200ee; color: white; cursor: pointer; font-weight: bold; }
         button:hover { background: #3700b3; }
         .join-btn { background: #03dac6; color: #000; }
         .join-btn:hover { background: #018786; color: #fff; }
-        
-        /* 右側房間列表樣式 */
-        #room-list { max-height: 400px; overflow-y: auto; text-align: left; }
-        .room-item { background: #2d2d2d; padding: 12px; margin-bottom: 8px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; }
-        .room-info div { font-size: 14px; margin-bottom: 4px; }
-        .room-info span { color: #03dac6; font-weight: bold; }
-        .quick-join { background: #03dac6; color: #000; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; width: auto; margin: 0; }
-        .quick-join:hover { background: #018786; color: #fff; }
-        .no-room { color: #888; text-align: center; padding: 20px; font-size: 14px; }
     </style>
 </head>
 <body>
 
-    <!-- 左側：開房與加入控制區 -->
     <div class="box">
-        <h2>建立或加入房間</h2>
+        <h2>SFC 網路對戰大廳</h2>
         
+        <!-- 選擇遊戲 -->
         <label>選擇遊戲：</label>
         <select id="gameSelect">
             <option value="super_tetris_3.smc">超級俄羅斯方塊 3 (Super Tetris 3)</option>
             <option value="mario.sfc">超級瑪利歐世界 (Super Mario World)</option>
         </select>
 
+        <!-- 建立房間 -->
         <button onclick="createRoom()">建立新房間 (1P 房主)</button>
 
         <hr style="border-color: #333; margin: 20px 0;">
 
-        <input type="text" id="roomInput" placeholder="輸入房號加入">
-        <button class="join-btn" onclick="joinRoomById()">加入房間</button>
-    </div>
-
-    <!-- 右側：即時房間列表 -->
-    <div class="box">
-        <h2>目前開房列表</h2>
-        <div id="room-list">
-            <div class="no-room">正在載入房間清單...</div>
-        </div>
+        <!-- 加入房間 -->
+        <input type="text" id="roomInput" placeholder="請輸入房號 (例如: abc12345)">
+        <button class="join-btn" onclick="joinRoom()">加入房間 (2-4P)</button>
     </div>
 
     <script>
-        // 初始化 Firebase（這裡使用免費公開的測試資料庫連線，讓你免去自己申請帳號的麻煩）
-        const firebaseConfig = {
-            databaseURL: "https://sfc-game-lobby-default-rtdb.firebaseio.com/" 
-        };
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.database();
-
-        // 建立房間
         function createRoom() {
             const game = document.getElementById('gameSelect').value;
-            const roomId = Math.random().toString(36).substring(2, 8); // 產生 6 位數隨機房號
-            
-            // 將房間資料寫入 Firebase 資料庫
-            db.ref('rooms/' + roomId).set({
-                game: game,
-                createdAt: Date.now()
-            }).then(() => {
-                // 寫入成功後，跳轉至房間頁面 (設定 mode=host)
-                window.location.href = `room.html?room=${roomId}&mode=host&game=${game}`;
-            });
+            // 產生 6 位數隨機房號
+            const roomId = Math.random().toString(36).substring(2, 8);
+            // 跳轉至房間頁面，設定為 host (房主)
+            window.location.href = `room.html?room=${roomId}&mode=host&game=${game}`;
         }
 
-        // 透過手動輸入房號加入
-        function joinRoomById() {
+        function joinRoom() {
             const roomId = document.getElementById('roomInput').value.trim();
+            const game = document.getElementById('gameSelect').value;
             if (!roomId) {
                 alert('請輸入房號！');
                 return;
             }
-            // 檢查該房間是否存在
-            db.ref('rooms/' + roomId).once('value').then((snapshot) => {
-                if (snapshot.exists()) {
-                    const game = snapshot.val().game;
-                    window.location.href = `room.html?room=${roomId}&mode=client&game=${game}`;
-                } else {
-                    alert('找不到此房間，請確認房號是否正確！');
-                }
-            });
-        }
-
-        // 點擊右側列表的「加入」按鈕
-        function joinRoom(roomId, game) {
+            // 跳轉至房間頁面，設定為 client (加入者)
             window.location.href = `room.html?room=${roomId}&mode=client&game=${game}`;
         }
-
-        // 即時監聽 Firebase 中的房間清單變化
-        const roomsRef = db.ref('rooms');
-        roomsRef.on('value', (snapshot) => {
-            const roomsListEl = document.getElementById('room-list');
-            roomsListEl.innerHTML = '';
-
-            const rooms = snapshot.val();
-            if (!rooms) {
-                roomsListEl.innerHTML = '<div class="no-room">目前沒有人開房間，趕快建立一個吧！</div>';
-                return;
-            }
-
-            // 渲染右側列表
-            for (let roomId in rooms) {
-                const room = rooms[roomId];
-                const item = document.createElement('div');
-                item.className = 'room-item';
-                item.innerHTML = `
-                    <div class="room-info">
-                        <div>房號：<span>${roomId}</span></div>
-                        <div>遊戲：${room.game}</div>
-                    </div>
-                    <button class="quick-join" onclick="joinRoom('${roomId}', '${room.game}')">加入</button>
-                `;
-                roomsListEl.appendChild(item);
-            }
-        });
     </script>
 </body>
 </html>
